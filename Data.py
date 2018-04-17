@@ -20,8 +20,8 @@ def generate_circlesquare(num_images=100000, img_dims=25):
 
     The hdf5 file format is
     HDF5:
-        - Dataset 'images' (num_images, 1, img_dims, img_dims)
-        - Dataset 'labels' (num_images, 1)
+        - Dataset 'images' (num_images, img_dims, img_dims, 1)
+        - Dataset 'labels' (num_images,)
 
     :param num_images:
     :param img_dims:
@@ -73,18 +73,18 @@ def generate_circlesquare(num_images=100000, img_dims=25):
 
     imgs = np.concatenate((img_circles, img_squares), 2)
     imgs = np.transpose(imgs, (2, 0, 1))
-    imgs = np.expand_dims(imgs, 1)
+    imgs = np.expand_dims(imgs, -1)
     imgs = imgs.astype(np.uint8)
-    labels = np.expand_dims(np.repeat(("Circle", "Square"), (num_images, num_images)), 1)
+    labels = np.repeat(("Circle", "Square"), (num_images, num_images))
 
     with h5py.File(h5fn, "w-") as h5handle:
         h5handle.create_dataset(
             name="images", data=imgs,
-            chunks=(1, 1, img_dims, img_dims),
+            chunks=(1, img_dims, img_dims, 1),
             compression=3)
         h5handle.create_dataset(
             name="labels", data=labels.astype(np.bytes_),
-            chunks=(1, 1), compression=3)
+            compression=3)
 
 
 def get_data(src="circlesquare", **kwargs):
@@ -101,7 +101,7 @@ def get_data(src="circlesquare", **kwargs):
         img_dims = kwargs["img_dims"]
         h5fn = "CircleSquareImages_numimgs-{}_size-{}px.h5".format(
             num_images, img_dims)
-    elif src.lower().startswith("m"): # mnist
+    elif src.lower().startswith("m"):  # mnist
         h5fn = "MNIST.h5"
     else:
         raise ValueError("'src' not supported")
@@ -111,3 +111,28 @@ def get_data(src="circlesquare", **kwargs):
         labels = h5handle["labels"][()].astype(np.str)
 
     return images, labels
+
+
+def get_labels(src="circlesquare", **kwargs):
+    """
+    Loads only labels from hdf5.
+
+    If loading 'circlesquare', then 'num_images' and 'img_dims' must be passed
+    as keyword parameters.
+    :param src:
+    :return:
+    """
+    if src.lower().startswith("c"):  # circlesquare
+        num_images = kwargs["num_images"]
+        img_dims = kwargs["img_dims"]
+        h5fn = "CircleSquareImages_numimgs-{}_size-{}px.h5".format(
+            num_images, img_dims)
+    elif src.lower().startswith("m"):  # mnist
+        h5fn = "MNIST.h5"
+    else:
+        raise ValueError("'src' not supported")
+
+    with h5py.File(h5fn, "r") as h5handle:
+        labels = h5handle["labels"][()].astype(np.str)
+
+    return labels

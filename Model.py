@@ -1,7 +1,7 @@
 # This module defines a keras module
 
 from keras.models import Model
-from keras.layers import Input, Conv2D, MaxPool2D, Dense
+from keras.layers import Input, Conv2D, MaxPool2D, Dense, Flatten
 
 
 def get_model(
@@ -69,9 +69,9 @@ def build_convnet(img_shape, nclasses):
         strides=(1, 1))(conv3)
     maxpool2 = MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding="valid")(conv4)
 
-    outputs = Conv2D(
-        filters=nclasses, kernel_size=(1, 1),
-        activation="sigmoid")(maxpool2)
+    flattened = Flatten()(maxpool2)
+
+    outputs = Dense(units=nclasses, activation="sigmoid")(flattened)
 
     model = Model(inputs=inputs, outputs=outputs)
     return model
