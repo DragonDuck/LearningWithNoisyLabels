@@ -18,19 +18,39 @@ def workflow_scrambling(dataset="mnist", modeltype="conv"):
     """
     images, labels = Data.get_data(src=dataset)
 
+    sel_indices = np.in1d(labels, ("1", "2", "9"))
+    images = images[sel_indices, ...]
+    labels = labels[sel_indices]
+
     # Loop through scrambling percentages
+    # Make sure the first entry stays 0 as there is no other record of the
+    # DNNs true performance
+    # percentages = np.array([
+    #     0, 0.25, 0.5, 0.75, 0.8, 0.825,
+    #     0.85, 0.875, 0.9, 0.95, 1.0])
     percentages = np.array([
-        0, 0.25, 0.5, 0.75, 0.8, 0.825,
-        0.85, 0.875, 0.9, 0.95, 1.0])
+         0, 0.2, 0.4, 0.45, 0.5, 0.6])
     true_scores = []
     scrambled_scores = []
+    predicted_labels = []
     for p in percentages:
         print("Scrambling = {}".format(p))
+
         true_score, scrambled_score, model = train_and_score_network(
             dataset=dataset, images=images, labels=labels,
             percentage=p, modeltype=modeltype)
         true_scores.append(true_score)
         scrambled_scores.append(scrambled_score)
+
+        pred = model.predict(x=images)
+        pred = np.argmax(pred, axis=1)
+        label_dict = get_label_dict(dataset=dataset)
+        reverse_label_dict = {val: key for key, val in label_dict.items()}
+        pred_str = np.array([
+            reverse_label_dict[pred[ii]] for ii
+            in range(len(pred))])
+        predicted_labels.append(pred_str)
+
         print("Scrambling = {}: True Score = {}; Scrambled Score = {}".format(
             p, true_score, scrambled_score))
 
@@ -39,13 +59,74 @@ def workflow_scrambling(dataset="mnist", modeltype="conv"):
             "TrueF1": true_scores,
             "ScrambledF1": scrambled_scores},
         index=percentages)
-
-    outfn = "ResultsScrambling_{}_{}.csv".format(dataset, modeltype)
+    outfn = "ResultsScrambling_ThreeClasses_{}_{}.csv".format(
+        dataset, modeltype)
     results.to_csv(outfn)
+
+    pred_labels = pd.DataFrame(
+        data=np.stack(predicted_labels, axis=1),
+        columns=["Iter{}".format(ii) for ii in range(len(predicted_labels))])
+    pred_labels["TrueLabels"] = labels
+
+    ploutfn = "PredictionsScrambling_ThreeClasses_{}_{}.csv".format(
+        dataset, modeltype)
+    pred_labels.to_csv(ploutfn)
+
+
+def workflow_scrambling_multiple_iterations(dataset="mnist", modeltype="conv"):
+    """
+    This workflow tests different scrambling degrees
+    :param dataset:
+    :param modeltype:
+    :return:
+    """
+    images, labels = Data.get_data(src=dataset)
+    label_dict = get_label_dict(dataset=dataset)
+    reverse_label_dict = {val: key for key, val in label_dict.items()}
+
+    # Loop through scrambling percentages
+    # Make sure the first entry stays 0 as there is no other record of the
+    # DNNs true performance
+    percentages = np.array([
+        0, 0.25, 0.5, 0.75, 0.8, 0.825,
+        0.85, 0.875, 0.9, 0.95, 1.0])
+    true_scores = []
+    scrambled_scores = []
+    predicted_labels = []
+    for p in percentages:
+        print("Scrambling = {}".format(p))
+
+        iter_true_scores = []
+        iter_scrambled_scores = []
+        iter_pred = []
+        for ii in range(10):
+            true_score, scrambled_score, model = train_and_score_network(
+                dataset=dataset, images=images, labels=labels,
+                percentage=p, modeltype=modeltype)
+            iter_true_scores.append(true_score)
+            iter_scrambled_scores.append(scrambled_score)
+
+            pred = model.predict(x=images)
+            pred = np.argmax(pred, axis=1)
+            pred_str = np.array([
+                reverse_label_dict[pred[ii]] for ii
+                in range(len(pred))])
+            iter_pred.append(pred_str)
+
+        true_scores.append(np.stack(iter_true_scores))
+        scrambled_scores.append(np.stack(iter_scrambled_scores))
+        predicted_labels.append(np.stack(iter_pred))
+
+        print("Scrambling = {}: True Score = {}; Scrambled Score = {}".format(
+            p, np.mean(iter_true_scores), np.mean(iter_scrambled_scores)))
+
+    np.save("TrueScores.npy", np.stack(true_scores))
+    np.save("ScrambledScores.npy", np.stack(scrambled_scores))
+    np.save("PredictedLabels.npy", np.stack(predicted_labels))
 
 
 def workflow_iterative_training(
-        scrambling=0.8, dataset="mnist", modeltype="conv"):
+        scrambling=0.9, dataset="mnist", modeltype="conv"):
     """
     This workflow tests iterative training for a fixed scaling.
 
@@ -80,12 +161,7 @@ def workflow_iterative_training(
         average="weighted")]
 
     # Loop until reconstructed or until abort criterion
-    while True:
-        # Abort criterion
-        if len(scores) > 10:
-            print("WARNING: No convergence after 10 iterations")
-            break
-
+    while len(scores) <= 10:
         # Quit if f1-score is close to 1
         if scores[-1] > 0.95:
             break
@@ -142,7 +218,7 @@ def workflow_strict_iterative_training(
     a reconstruction is attempted.
 
     Instead of naively using the output of iteration n-1 as labels for
-    iteration n, only those labels with a new certainty of >= 95% are changed.
+    iteration n, labels are only changed for the 10% most certain new labels
     :param scrambling
     :param dataset:
     :param modeltype:
@@ -172,13 +248,8 @@ def workflow_strict_iterative_training(
         average="weighted")]
 
     # Loop until reconstructed or until abort criterion
-    while True:
-        # Abort criterion
-        if len(scores) > 10:
-            print("WARNING: No convergence after 10 iterations")
-            break
-
-        # Quit if f1-score is close to 1
+    while len(scores) < 10:
+        # Quit if early convergence
         if scores[-1] > 0.95:
             break
 
@@ -208,10 +279,21 @@ def workflow_strict_iterative_training(
             y_pred=np.argmax(labels_test, axis=1),
             average="weighted"))
 
-        # Update labels
+        # Update labels for the most certain entries
         pred_full = model.predict(x=images)
-        pred_full = np.argmax(pred_full, axis=1)
-        cur_labels = keras.utils.to_categorical(pred_full)
+        pred_full_sm = np.exp(pred_full) / np.sum(
+            np.exp(pred_full), axis=1)[:, None]
+
+        new_certainty = np.max(pred_full_sm, axis=1)
+        new_label = np.argmax(pred_full_sm, axis=1)
+        old_label = np.argmax(cur_labels, axis=1)
+        certainty_thresh = np.percentile(
+            a=new_certainty[new_label != old_label], q=90)
+        # Set cur_label with new_thresh > certainty_thresh to the
+        # new label
+        old_label[new_certainty >= certainty_thresh] = new_label[
+            new_certainty >= certainty_thresh]
+        cur_labels = keras.utils.to_categorical(old_label)
 
         print("Iteration {}: Score = {}".format(
             len(scores) - 1, scores[-1]))
