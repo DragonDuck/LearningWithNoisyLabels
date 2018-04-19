@@ -3,6 +3,7 @@
 import Data
 import Model
 import numpy as np
+import h5py
 import keras.utils
 import sklearn.model_selection
 import sklearn.metrics
@@ -75,11 +76,17 @@ def workflow_scrambling(dataset="mnist", modeltype="conv"):
 
 def workflow_scrambling_multiple_iterations(dataset="mnist", modeltype="conv"):
     """
-    This workflow tests different scrambling degrees
+    This workflow tests different scrambling degrees.
+
+    It performs training multiple times with random scrambling for statistical
+    power.
     :param dataset:
     :param modeltype:
     :return:
     """
+    # The number of replicates for each scrambling rate
+    n_replicates = 10
+
     images, labels = Data.get_data(src=dataset)
     label_dict = get_label_dict(dataset=dataset)
     reverse_label_dict = {val: key for key, val in label_dict.items()}
@@ -99,7 +106,7 @@ def workflow_scrambling_multiple_iterations(dataset="mnist", modeltype="conv"):
         iter_true_scores = []
         iter_scrambled_scores = []
         iter_pred = []
-        for ii in range(10):
+        for ii in range(n_replicates):
             true_score, scrambled_score, model = train_and_score_network(
                 dataset=dataset, images=images, labels=labels,
                 percentage=p, modeltype=modeltype)
@@ -120,9 +127,33 @@ def workflow_scrambling_multiple_iterations(dataset="mnist", modeltype="conv"):
         print("Scrambling = {}: True Score = {}; Scrambled Score = {}".format(
             p, np.mean(iter_true_scores), np.mean(iter_scrambled_scores)))
 
-    np.save("TrueScores.npy", np.stack(true_scores))
-    np.save("ScrambledScores.npy", np.stack(scrambled_scores))
-    np.save("PredictedLabels.npy", np.stack(predicted_labels))
+    # True and Scrambled scores are stored as arrays with each row being a
+    # scrambling rate and each column being a replicate
+    results_ts = pd.DataFrame(
+        data=np.stack(true_scores),
+        columns=["Rep{}".format(ii+1) for ii in range(n_replicates)],
+        index=percentages)
+    results_ts.to_csv("Results_TrueScores_{}_{}.csv".format(
+        dataset, modeltype))
+    results_ss = pd.DataFrame(
+        data=np.stack(scrambled_scores),
+        columns=["Rep{}".format(ii + 1) for ii in range(n_replicates)],
+        index=percentages)
+    results_ss.to_csv("Results_ScrambledScores_{}_{}.csv".format(
+        dataset, modeltype))
+
+    # The predicted labels must be stored as an h5 file as they are 3D
+    pl_fn = "Results_PredictedLabels_{}_{}.h5".format(dataset, modeltype)
+    with h5py.File(pl_fn, "w") as h5handle:
+        h5handle.create_dataset(
+            name="data",
+            data=np.stack(predicted_labels).astype(np.bytes_))
+        h5handle.create_dataset(
+            name="axisnames",
+            data=np.array([
+                "scrambling_rate", "repetitions",
+                "predictions"]).astype(np.bytes_))
+        h5handle.create_dataset(name="scrambling_rate", data=percentages)
 
 
 def workflow_iterative_training(

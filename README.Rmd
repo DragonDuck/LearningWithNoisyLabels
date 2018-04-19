@@ -7,6 +7,9 @@ output: md_document
 ```{r setup, echo=FALSE}
 library(ggplot2)
 library(pheatmap)
+library(reshape2)
+library(rhdf5)
+library(abind)
 
 custom_theme <- function(base_size=14, base_family="Helvetica") {
   library(grid)
@@ -52,37 +55,71 @@ custom_color <- function(...){
 
 This experiment shows how deep neural networks (DNNs) perform on noisy data. To this end, I trained a convolution DNN (structure: conv-conv-pool-conv-conv-pool-dense) to classify MNIST handwritten digits. However, the labels were randomly perturbed so that a defined fraction of labels was guaranteed to be incorrect. After training, the accuracy (F1-score) of the network was calculated *on the original, unperturbed labels*. This mini-experiment shows that even after significant scrambling, the true accuracy of the network remains nearly unchanged.
 
-```{r, fig.width=4, fig.height=4}
+```{r}
 scrambling_results = read.csv(
-  file = "ResultsScrambling_mnist_conv.csv", header = TRUE, row.names = NULL)
+  file = "Results_TrueScores_mnist_conv.csv", 
+  header = TRUE, row.names = NULL)
+ggplot_df = data.frame(
+  "X" = scrambling_results$X, 
+  "Mean" = rowMeans(scrambling_results[,2:ncol(scrambling_results)]),
+  "Var" = apply(scrambling_results[,2:ncol(scrambling_results)], 1, sd))
 
-ggplot(data = scrambling_results, mapping = aes(x = X, y = TrueF1)) + 
-  geom_point(size = 4) + geom_line(size = 2) + custom_theme() + 
-  coord_fixed() + labs(
-    x = "Scrambling Factor", y = "F1-Score", 
-    caption = paste0(
-       "F1-Score of DNN trained on\n",
-       "scrambled labels versus the\n",
-       "true labels"))
-ggsave("ResultsScrambling_mnist_conv.pdf", width = 4, 
+ggplot(data = ggplot_df, mapping = aes(x = X, y = Mean)) + 
+  geom_line(size = 1, color = "gray") + geom_point() + 
+  geom_errorbar(
+    mapping = aes(ymin = Mean - Var, ymax = Mean + Var)) + 
+  coord_fixed() + custom_theme() + 
+  labs(x = "Scrambling Factor", y = "F1-Score")
+
+ggsave("Results_TrueScores_mnist_conv.pdf", width = 4, 
        height = 4, useDingbats = FALSE)
 ```
 
-I take a look at the confusion matrix of predictions versus true labels. The network clearly favors certain 
+Out of interest, I also take a look at the accuracies on the scrambled labels, i.e. the labels the network was trained on. The accuracy with regards to the incorrect labels decreases rapidly as the scrambling rate increases. The accuracy of a DNN on its training data could therefore be used as a measure of how noisy the labels are. Further study is required to differentiate label noise from an ill-trained DNN, however.
+```{r, fig.width=4, fig.height=4}
+scrambling_results = read.csv(
+  file = "Results_ScrambledScores_mnist_conv.csv", 
+  header = TRUE, row.names = NULL)
+ggplot_df = data.frame(
+  "X" = scrambling_results$X, 
+  "Mean" = rowMeans(scrambling_results[,2:ncol(scrambling_results)]),
+  "Var" = apply(scrambling_results[,2:ncol(scrambling_results)], 1, sd))
+
+ggplot(data = ggplot_df, mapping = aes(x = X, y = Mean)) + 
+  geom_line(size = 1, color = "gray") + geom_point() + 
+  geom_errorbar(
+    mapping = aes(ymin = Mean - Var, ymax = Mean + Var)) + 
+  coord_fixed() + custom_theme() + 
+  labs(x = "Scrambling Factor", y = "F1-Score")
+
+ggsave("Results_ScrambledScores_mnist_conv.pdf", width = 4, 
+       height = 4, useDingbats = FALSE)
+```
+
+I take a look at the confusion matrix of predictions versus true labels. I average the results over all repetitions.
 ```{r}
 scrambling = "0.8"
-pred_labels = read.csv(
-  file = "PredictionsScrambling_mnist_conv.csv", 
-  header = TRUE, row.names = 1)
-# Hack, this should be done in the python code
-colnames(pred_labels) = c(
-  "0", "0.25", "0.5", "0.75", "0.8", "0.825",
-  "0.85", "0.875", "0.9", "0.95", "1.0", "TrueLabels")
 
-conf_mat = table(
-  "Pred" = pred_labels[[scrambling]], 
-  "True" = pred_labels$TrueLabels)
-conf_lab = conf_mat
+scrambling_rates = h5read(
+  file = "Results_PredictedLabels_mnist_conv.h5", 
+  name = "scrambling_rate")
+pred_labels = h5read(
+  file = "Results_PredictedLabels_mnist_conv.h5", 
+  name = "data", index = list(
+    NULL, NULL, which(scrambling_rates == scrambling)))[,,1]
+H5close()
+
+true_labels = h5read(file = "MNIST.h5", name = "labels")
+H5close()
+
+confmats = list()
+for(rep in seq_len(dim(pred_labels)[2])) {
+  confmats[[rep]] = table("True" = true_labels, "Pred" = pred_labels[,rep])
+}
+
+conf_mat = abind(confmats, along = 3)
+conf_mat = apply(conf_mat, c(1, 2), mean)
+conf_lab = round(conf_mat)
 diag(conf_mat) = 0
 hm_colorScale = colorRampPalette(
   c("#f6f8fb", "#DAE3F0", "#B5C8E1", rep("#8FACD2", 9)))(150)
@@ -95,7 +132,8 @@ pheatmap(
   mat = conf_mat, cluster_cols = FALSE, cluster_rows = FALSE, 
   color = hm_colorScale, display_numbers = conf_lab, fontsize_number = 12, 
   legend = FALSE, cellwidth = 30, cellheight = 30, 
-  border_color = NA, filename = sprintf("PredictedLabels_%s.pdf", scrambling))
+  border_color = NA, filename = sprintf(
+    "Results_PredictedLabels_Heatmap_mnist_conv_%s.pdf", scrambling))
 ```
 
 
