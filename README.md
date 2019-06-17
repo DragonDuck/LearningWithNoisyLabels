@@ -21,30 +21,48 @@ import matplotlib.pyplot as plt
 import sklearn.model_selection
 import sklearn.metrics
 import keras.utils
+import keras.datasets
 from keras.models import Model
 from keras.layers import Input, Conv2D, MaxPool2D, Dense, Flatten
 ```
 
+    Using TensorFlow backend.
+
+
 ## The Data
-To showcase the effects of noisy labels, I will use the [MNIST handwritten digit dataset](http://yann.lecun.com/exdb/mnist/). I have previously downloaded and pre-processed the data and stored it in an HDF5 file.
+To showcase the effects of noisy labels, I will use the [MNIST handwritten digit dataset](http://yann.lecun.com/exdb/mnist/).
 
 
 ```python
-with h5py.File("MNIST.h5", "r") as h5handle:
-    images = h5handle["images"][()]
-    labels = h5handle["labels"][()]
+(x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
+
+# Min-Max Scaling
+train_min = np.min(x_train, axis=(1, 2))[:, np.newaxis, np.newaxis]
+train_max = np.max(x_train, axis=(1, 2))[:, np.newaxis, np.newaxis]
+x_train = (x_train - train_min) / (train_max - train_min)
+test_min = np.min(x_test, axis=(1, 2))[:, np.newaxis, np.newaxis]
+test_max = np.max(x_test, axis=(1, 2))[:, np.newaxis, np.newaxis]
+x_test = (x_test - test_min) / (test_max - test_min)
+
+# Transform input to be 4D
+x_train = x_train[..., None]
+x_test = x_test[..., None]
 ```
 
 The images are stored as a 4D array (Tensorflow format: batch size, width, height, number of channels) and the labels are a simple 1D array.
 
 
 ```python
-print("Images array shape: {}".format(images.shape))
-print("Labels array shape: {}".format(labels.shape))
+print("Training Images array shape: {}".format(x_train.shape))
+print("Testing Images array shape:  {}".format(x_test.shape))
+print("Training Labels array shape: {}".format(y_train.shape))
+print("Testing Labels array shape:  {}".format(y_test.shape))
 ```
 
-    Images array shape: (70000, 28, 28, 1)
-    Labels array shape: (70000,)
+    Training Images array shape: (60000, 28, 28, 1)
+    Testing Images array shape:  (10000, 28, 28, 1)
+    Training Labels array shape: (60000,)
+    Testing Labels array shape:  (10000,)
 
 
 A look at some of the digits shows us the expected output.
@@ -52,17 +70,17 @@ A look at some of the digits shows us the expected output.
 
 ```python
 fig, ax = plt.subplots(2, 2);
-ax[0, 0].imshow(images[284, ..., 0], cmap="gray");
-ax[0, 0].set_title("Label: " + str(labels[284]));
+ax[0, 0].imshow(x_train[284, ..., 0], cmap="gray");
+ax[0, 0].set_title("Label: " + str(y_train[284]));
 ax[0, 0].axis("off");
-ax[0, 1].imshow(images[1129, ..., 0], cmap="gray");
-ax[0, 1].set_title("Label: " + str(labels[1129]));
+ax[0, 1].imshow(x_train[1129, ..., 0], cmap="gray");
+ax[0, 1].set_title("Label: " + str(y_train[1129]));
 ax[0, 1].axis("off");
-ax[1, 0].imshow(images[9470, ..., 0], cmap="gray");
-ax[1, 0].set_title("Label: " + str(labels[9470]));
+ax[1, 0].imshow(x_test[9471, ..., 0], cmap="gray");
+ax[1, 0].set_title("Label: " + str(y_test[9471]));
 ax[1, 0].axis("off");
-ax[1, 1].imshow(images[30044, ..., 0], cmap="gray");
-ax[1, 1].set_title("Label: " + str(labels[30044]));
+ax[1, 1].imshow(x_test[44, ..., 0], cmap="gray");
+ax[1, 1].set_title("Label: " + str(y_test[44]));
 ax[1, 1].axis("off");
 plt.show()
 ```
@@ -70,8 +88,6 @@ plt.show()
 
 ![png](output_8_0.png)
 
-
-I separate the data into a training and a test dataset.
 
 ## The Model
 I'll be using a simple convolutional network for this task. MNIST is an extremely easy dataset to classify and doesn't require a particularly sophisticated model.
@@ -123,8 +139,8 @@ def get_model(img_shape, nclasses):
 
 ```python
 model = get_model(
-    img_shape=images.shape[1:4], 
-    nclasses=len(np.unique(labels)))
+    img_shape=x_train.shape[1:4], 
+    nclasses=len(np.unique(y_train)))
 ```
 
     WARNING:tensorflow:From /home/jan/anaconda3/envs/py3/lib/python3.7/site-packages/tensorflow/python/framework/op_def_library.py:263: colocate_with (from tensorflow.python.framework.ops) is deprecated and will be removed in a future version.
@@ -257,17 +273,20 @@ training_histories = []
 percentages = np.arange(0, 1.1, 0.1)
 
 for p in percentages:
-    scrambled_labels = scramble_labels(
-        labels=labels, percentage=p)
+    print("Scrambling percentage: {:.2f}".format(p))
+    print("-------------------------")
+    y_train_scrambled = scramble_labels(
+        labels=y_train, percentage=p)
+    y_test_scrambled = scramble_labels(
+        labels=y_test, percentage=p)
 
-    x_train, x_test, y_train, y_test, y_scr_train, y_scr_test = sklearn.model_selection.train_test_split(
-        images, 
-        keras.utils.to_categorical(labels), 
-        keras.utils.to_categorical(scrambled_labels), 
-        test_size=10000, random_state=101)
-
+    y_train_cat = keras.utils.to_categorical(y_train)
+    y_test_cat = keras.utils.to_categorical(y_test)
+    y_train_scrambled_cat = keras.utils.to_categorical(y_train_scrambled)
+    y_test_scrambled_cat = keras.utils.to_categorical(y_test_scrambled)
+    
     training_histories.append(model.fit(
-        x=x_train, y=y_scr_train,
+        x=x_train, y=y_train_scrambled_cat,
         validation_split=0.3,
         batch_size=32, epochs=5, verbose=2))
 
@@ -275,141 +294,175 @@ for p in percentages:
 
     f1scores_real.append(
         sklearn.metrics.f1_score(
-            y_true=np.argmax(y_test, axis=1),
+            y_true=np.argmax(y_test_cat, axis=1),
             y_pred=np.argmax(pred, axis=1),
             average="weighted"))
 
     f1scores_scrambled.append(
         sklearn.metrics.f1_score(
-            y_true=np.argmax(y_scr_test, axis=1),
+            y_true=np.argmax(y_test_scrambled_cat, axis=1),
             y_pred=np.argmax(pred, axis=1),
             average="weighted"))
+    print("-------------------------")
 ```
 
+    Scrambling percentage: 0.0
+    -------------------------
     WARNING:tensorflow:From /home/jan/anaconda3/envs/py3/lib/python3.7/site-packages/tensorflow/python/ops/math_ops.py:3066: to_int32 (from tensorflow.python.ops.math_ops) is deprecated and will be removed in a future version.
     Instructions for updating:
     Use tf.cast instead.
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 39s - loss: 0.1782 - val_loss: 0.0752
+     - 24s - loss: 0.1859 - val_loss: 0.0789
     Epoch 2/5
-     - 36s - loss: 0.0503 - val_loss: 0.0413
+     - 32s - loss: 0.0526 - val_loss: 0.0592
     Epoch 3/5
-     - 38s - loss: 0.0357 - val_loss: 0.0356
+     - 25s - loss: 0.0420 - val_loss: 0.0447
     Epoch 4/5
-     - 38s - loss: 0.0271 - val_loss: 0.0391
+     - 24s - loss: 0.0318 - val_loss: nan
     Epoch 5/5
-     - 39s - loss: 0.0233 - val_loss: 0.0435
+     - 44s - loss: 0.0276 - val_loss: 0.0534
+    -------------------------
+    Scrambling percentage: 0.1
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 42s - loss: 0.6430 - val_loss: 0.6335
+     - 44s - loss: 0.6467 - val_loss: 0.6239
     Epoch 2/5
-     - 37s - loss: 0.6004 - val_loss: 0.6208
+     - 46s - loss: 0.6051 - val_loss: 0.6141
     Epoch 3/5
-     - 37s - loss: 0.5794 - val_loss: 0.6246
+     - 43s - loss: 0.5853 - val_loss: 0.6141
     Epoch 4/5
-     - 37s - loss: 0.5636 - val_loss: 0.6216
+     - 44s - loss: 0.5683 - val_loss: 0.6179
     Epoch 5/5
-     - 37s - loss: 0.5456 - val_loss: 0.6312
+     - 44s - loss: 0.5520 - val_loss: 0.6262
+    -------------------------
+    Scrambling percentage: 0.2
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 35s - loss: 1.0037 - val_loss: 1.0009
+     - 46s - loss: 1.0086 - val_loss: 1.0217
     Epoch 2/5
-     - 31s - loss: 0.9728 - val_loss: 1.0117
+     - 43s - loss: 0.9779 - val_loss: 1.0161
     Epoch 3/5
-     - 34s - loss: 0.9550 - val_loss: 1.0080
+     - 41s - loss: 0.9581 - val_loss: 1.0198
     Epoch 4/5
-     - 35s - loss: 0.9349 - val_loss: 1.0154
+     - 41s - loss: 0.9394 - val_loss: 1.0240
     Epoch 5/5
-     - 41s - loss: 0.9119 - val_loss: 1.0257
+     - 41s - loss: 0.9164 - val_loss: 1.0423
+    -------------------------
+    Scrambling percentage: 0.30000000000000004
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 33s - loss: 1.3348 - val_loss: 1.3446
+     - 42s - loss: 1.3353 - val_loss: 1.3507
     Epoch 2/5
-     - 29s - loss: 1.3022 - val_loss: 1.3531
+     - 43s - loss: 1.3038 - val_loss: 1.3353
     Epoch 3/5
-     - 30s - loss: 1.2804 - val_loss: 1.3584
+     - 41s - loss: 1.2841 - val_loss: 1.3420
     Epoch 4/5
-     - 29s - loss: 1.2570 - val_loss: 1.3738
+     - 41s - loss: 1.2636 - val_loss: 1.3597
     Epoch 5/5
-     - 30s - loss: 1.2312 - val_loss: 1.3752
+     - 38s - loss: 1.2394 - val_loss: 1.3804
+    -------------------------
+    Scrambling percentage: 0.4
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 31s - loss: 1.6142 - val_loss: 1.6128
+     - 23s - loss: 1.6106 - val_loss: 1.6083
     Epoch 2/5
-     - 38s - loss: 1.5818 - val_loss: 1.6084
+     - 23s - loss: 1.5787 - val_loss: 1.6086
     Epoch 3/5
-     - 37s - loss: 1.5610 - val_loss: 1.6150
+     - 23s - loss: 1.5578 - val_loss: 1.6170
     Epoch 4/5
-     - 33s - loss: 1.5366 - val_loss: 1.6290
+     - 23s - loss: 1.5367 - val_loss: 1.6221
     Epoch 5/5
-     - 32s - loss: 1.5080 - val_loss: 1.6440
+     - 23s - loss: 1.5085 - val_loss: 1.6413
+    -------------------------
+    Scrambling percentage: 0.5
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 31s - loss: 1.8440 - val_loss: 1.8436
+     - 23s - loss: 1.8464 - val_loss: 1.8496
     Epoch 2/5
-     - 35s - loss: 1.8150 - val_loss: 1.8484
+     - 23s - loss: 1.8199 - val_loss: 1.8432
     Epoch 3/5
-     - 33s - loss: 1.7937 - val_loss: 1.8500
+     - 23s - loss: 1.8008 - val_loss: 1.8426
     Epoch 4/5
-     - 35s - loss: 1.7694 - val_loss: 1.8573
+     - 23s - loss: 1.7802 - val_loss: 1.8527
     Epoch 5/5
-     - 38s - loss: 1.7377 - val_loss: 1.8815
+     - 23s - loss: 1.7537 - val_loss: 1.8637
+    -------------------------
+    Scrambling percentage: 0.6000000000000001
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 34s - loss: 2.0340 - val_loss: 2.0400
+     - 23s - loss: 2.0305 - val_loss: 2.0313
     Epoch 2/5
-     - 31s - loss: 2.0085 - val_loss: 2.0369
+     - 23s - loss: 2.0070 - val_loss: 2.0300
     Epoch 3/5
-     - 29s - loss: 1.9896 - val_loss: 2.0426
+     - 23s - loss: 1.9887 - val_loss: 2.0411
     Epoch 4/5
-     - 29s - loss: 1.9698 - val_loss: 2.0513
+     - 23s - loss: 1.9686 - val_loss: 2.0470
     Epoch 5/5
-     - 28s - loss: 1.9407 - val_loss: 2.0737
+     - 26s - loss: 1.9439 - val_loss: 2.0600
+    -------------------------
+    Scrambling percentage: 0.7000000000000001
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 28s - loss: 2.1815 - val_loss: 2.1719
+     - 23s - loss: 2.1786 - val_loss: 2.1752
     Epoch 2/5
-     - 28s - loss: 2.1600 - val_loss: 2.1767
+     - 23s - loss: 2.1614 - val_loss: 2.1752
     Epoch 3/5
-     - 28s - loss: 2.1460 - val_loss: 2.1783
+     - 23s - loss: 2.1467 - val_loss: 2.1788
     Epoch 4/5
-     - 29s - loss: 2.1283 - val_loss: 2.1826
+     - 23s - loss: 2.1309 - val_loss: 2.1865
     Epoch 5/5
-     - 29s - loss: 2.1030 - val_loss: 2.2028
+     - 23s - loss: 2.1086 - val_loss: 2.2018
+    -------------------------
+    Scrambling percentage: 0.8
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 28s - loss: 2.2753 - val_loss: 2.2737
+     - 23s - loss: 2.2729 - val_loss: 2.2690
     Epoch 2/5
-     - 29s - loss: 2.2642 - val_loss: 2.2729
+     - 23s - loss: 2.2623 - val_loss: 2.2690
     Epoch 3/5
-     - 29s - loss: 2.2557 - val_loss: 2.2775
+     - 23s - loss: 2.2546 - val_loss: 2.2726
     Epoch 4/5
-     - 29s - loss: 2.2453 - val_loss: 2.2857
+     - 23s - loss: 2.2437 - val_loss: 2.2769
     Epoch 5/5
-     - 28s - loss: 2.2283 - val_loss: 2.2915
+     - 26s - loss: 2.2278 - val_loss: 2.2908
+    -------------------------
+    Scrambling percentage: 0.9
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 28s - loss: 2.3056 - val_loss: 2.3026
+     - 23s - loss: 2.3062 - val_loss: 2.3032
     Epoch 2/5
-     - 28s - loss: 2.3023 - val_loss: 2.3028
+     - 23s - loss: 2.3022 - val_loss: 2.3035
     Epoch 3/5
-     - 29s - loss: 2.3020 - val_loss: 2.3034
+     - 26s - loss: 2.3013 - val_loss: 2.3033
     Epoch 4/5
-     - 29s - loss: 2.3007 - val_loss: 2.3054
+     - 25s - loss: 2.3012 - val_loss: 2.3045
     Epoch 5/5
-     - 28s - loss: 2.2984 - val_loss: 2.3061
+     - 25s - loss: 2.2991 - val_loss: 2.3045
+    -------------------------
+    Scrambling percentage: 1.0
+    -------------------------
     Train on 42000 samples, validate on 18000 samples
     Epoch 1/5
-     - 29s - loss: 2.2954 - val_loss: 2.2844
+     - 28s - loss: 2.3012 - val_loss: 2.2987
     Epoch 2/5
-     - 29s - loss: 2.2771 - val_loss: 2.2713
+     - 27s - loss: 2.2913 - val_loss: 2.2830
     Epoch 3/5
-     - 28s - loss: 2.2629 - val_loss: 2.2636
+     - 28s - loss: 2.2722 - val_loss: 2.2657
     Epoch 4/5
-     - 29s - loss: 2.2513 - val_loss: 2.2538
+     - 29s - loss: 2.2523 - val_loss: 2.2569
     Epoch 5/5
-     - 28s - loss: 2.2383 - val_loss: 2.2507
+     - 24s - loss: 2.2391 - val_loss: 2.2499
+    -------------------------
 
 
 
@@ -433,7 +486,7 @@ ax.set_ylabel("F1 Score");
 ```
 
 
-![png](output_22_0.png)
+![png](output_21_0.png)
 
 
 ## Conclusion
